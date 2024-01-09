@@ -1,0 +1,417 @@
+---
+title: "Final Assignment: Question 3"
+params:
+  run_scraping: FALSE
+author: "Candidate number 27715"
+date: "AT 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE} 
+
+knitr::opts_chunk$set(echo = FALSE) 
+```
+
+
+```{r, warning= FALSE, message=FALSE}
+# Load packages
+library(spotifyr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(httr)
+library(rvest)
+library(jsonlite)
+library(stringr)
+library(ggpubr)
+library(ggcorrplot)
+library(gridExtra)
+```
+*The GitHub repository can be accessed [here](https://github.com/0991951659/472_q3). In addition to markdown and HTML files in the repository, I include final datasets to help producing exact visualizations as this analysis.*
+
+## Introduction
+This analysis explores the enduring popularity of the Rolling Stone 100 greatest artists, defining "enduring engagement" as maintaining popularity over time. After analyzing various features and comparing the Rolling Stone artists with a randomly selected 100 artists, I conclude that audio features such as low danceability, more instrumentalness and sadder tone of music may contribute to enduring effects. The decision to compare these features with other 100 artists is to carefully examine whether the music features are exclusive to Rolling Stone artists. The project begins by explaining the data sources, which include the Spotify API and Billboard Hot 100 chart data. The subsequent analysis section presents comparisons of performances on the chart and song features. Finally, issues and limitations of the data and analysis are discussed.
+
+## Data
+The 100 artists and bands were obtained from the Rolling Stone website. To access Spotify API, users are required to register for a Developer Account and create an application to obtain credentials, including Client ID and Client Secret. I then used the "spotifyr" package to facilitate obtaining data. Another dataset is the Billboard Hot 100 chart data from Sean Miller's [GitHub repository](https://github.com/HipsterVizNinja). This dataset includes songs that top the chart from 1958 to 2021. The dataset is tidy and accessed by many accounts, highlighting the high-quality and trustworthiness of the data.
+
+Besides artist identifers, the following variables were extracted from Spotify: speechiness, acousticness, instrumentalness, valence, danceability and energy (Definitions explained in Appendix). For preparation, I created the function "get_artists_data" to extract these variables and arrange them into CSV format. Meanwhile, I randomly selected 100 artists from the Billboard data that topped the weekly charts but were not considered "greatest musical artists" by Rolling Stones. I also applied the "get_artists_data" function to this group. From now, these artists are referred to as "Billboard artists," while "Rolling Stone artists" are the artists from Rolling Stones magazine. For final analysis, I adjusted both datasets to include each artist's song that stay on Billboard chart the longest. This decision narrows the samples down to songs with the most "enduring engagement", aligning with the purpose of the analysis. The final two data sets contain one row per one Artist's song, with identifiers, number of weeks on the chart and audio features presented in each column. 
+
+
+
+```{r get spotify data, warning= FALSE, message=FALSE}
+if (params$run_scraping) {
+  
+readLines("~/472/me.env")
+apikey <- Sys.getenv("me")
+
+#  Separate into 7 lists to prevent going over Spotify API limit
+Top_100_artists <- c(
+  "The Beatles", "Bob Dylan", "Elvis Presley", "The Rolling Stones", "Chuck Berry",
+  "Jimi Hendrix", "James Brown", "Little Richard", "Aretha Franklin", "Ray Charles",
+  "Bob Marley", "The Beach Boys", "Buddy Holly", "Led Zeppelin", "Stevie Wonder",
+  "Sam Cooke", "Muddy Waters", "Marvin Gaye")
+  
+  
+Top_100_artists2<- c("The Velvet Underground", "Bo Diddley",
+  "Otis Redding", "U2", "Bruce Springsteen", "Jerry Lee Lewis", "Fats Domino",
+  "Ramones", "The Clash", "The Who", "The Rolling Stones", "Johnny Cash",
+  "Smokey Robinson", "The Everly Brothers", "James Taylor", "The Byrds")
+  
+
+Top_100_artists3<-c("The Allman Brothers Band", "The Talking Heads", "The Police", "The Kinks", "Van Morrison", "Sly and the Family Stone", "Cheap Trick", "Lynyrd Skynyrd", "The Yardbirds", "The Ramones", "The Eagles", "Prince", "The Drifters", "Simon & Garfunkel", "The Doors", "Blondie",
+  "John Lee Hooker", "Roy Orbison")
+
+Top_100_artists4<-c("The Bee Gees", "Aerosmith", "Creedence Clearwater Revival",
+  "The Temptations", "The Band", "Guns N' Roses", "The Stooges", "Bo Diddley", "Cream",
+  "The Miracles", "The Four Tops", "Tupac Shakur")
+
+ Top_100_artists5<-c( "Parliament-Funkadelic", "Elton John",
+  "The Mamas and the Papas", "Los Lobos", "Santana", "Tom Petty and the Heartbreakers",
+  "A Tribe Called Quest", "AC/DC")
+ 
+ Top_100_artists6<-c( "The Shirelles", "Beastie Boys", "The Byrds", "Janis Joplin",
+  "The Drifters", "The Coasters", "The Jackson 5", "Sam & Dave", "Metallica", "Buddy Guy",
+  "Ike and Tina Turner")
+ 
+ Top_100_artists7<-c("The Red Hot Chili Peppers", "Frank Zappa", "Earth, Wind & Fire",
+  "The Pretenders", "The Flamingos", "The Velvet Underground", "The Beach Boys", "OutKast",
+  "Booker T. & the M.G.'s", "The O'Jays", "The Byrds", "Pink Floyd", "Cream", "Wilson Pickett",
+  "Etta James", "The Four Tops")
+
+# Function to get API with spotifyr package
+get_artists_data <- function(top_100_artists) {
+  all_artists_data <- list()
+
+  for (artist in top_100_artists) {
+    # tryCatch to handle errors: skip artists with no albums
+    artist_data <- tryCatch({
+      get_artist_audio_features(artist) # variable from spotifyr package 
+    }, error = function(e) {
+      message(paste("Error with artist", artist, ":", e$message))
+      if (grepl("No albums found", e$message)) {
+        message(paste("Skipping artist", artist, "due to no albums found."))
+        return(NULL) 
+      }
+      return(NULL)
+    })
+
+    # If  does not return NULL, continue
+    if (!is.null(artist_data)) {
+      artist_data_selected <- artist_data %>%
+        select(artist_name, album_release_year, danceability, energy, key, loudness, mode, 
+               speechiness, acousticness, instrumentalness, liveness, valence, tempo, track_name)
+      
+      all_artists_data[[artist]] <- artist_data_selected
+    }
+    
+    # Rest for 3 seconds to prevent reaching API's rate limit
+    Sys.sleep(3)
+  }
+
+  # Combine all individual artist data into one dataframe
+  final_dataframe <- bind_rows(all_artists_data, .id = "artist")
+  return(final_dataframe)
+}
+
+data1<-get_artists_data(Top_100_artists)
+data2<-get_artists_data(Top_100_artists2)
+data3<-get_artists_data(Top_100_artists3)
+data4<-get_artists_data(Top_100_artists4)
+data5<-get_artists_data(Top_100_artists5)
+data6<-get_artists_data(Top_100_artists6)
+data7<-get_artists_data(Top_100_artists7)
+final_100 <- bind_rows(data1, data2, data3, data4, data5, data6, data7)
+
+write.csv(final_100,"final_100.csv")
+}
+```
+
+
+```{r get billboard artists and repeat the get_artist_data, warning= FALSE, message=FALSE}
+if (params$run_scraping) {
+# get billboard chart data for Rolling stone artists
+chart_data<-read.csv("~/472/chart_data.csv")
+
+# Subset to get rid of rollingstone artist 
+no_rollingstones<- chart_data[!(chart_data$Performer %in% rollingstones), ]
+
+
+# Randomly select 100 unique performers from the no_rollingstone chart data 
+
+unique_performers <- unique(no_rollingstones$Performer)
+billboard <- sample(unique_performers, 100)
+
+billboard  <- chart_data[chart_data$Performer %in% billboard , ]
+
+# put billboard artists into a list in case ransomisation generate a different group of artists
+billboard <- c(
+  "Ariana Grande", "David Hallyday", "The Church",
+  "Benny Blanco", "Tim McGraw", "Twista",
+  "Jackie Moore", "Maren Morris", "J. Cole",
+  "Phill Wilson", "Usher", "Lucille Starr", "The San Remo Golden Strings",
+  "Mario Vazquez", "Travis Scott", "Lil' Mo", "Mary Lambert",
+  "Meek Mill", "Nicky Jam", "Chris Brown",
+  "Inner Circle", "Dusty Springfield", "Rozetta Johnson", "Major Lazer",
+  "Inez Foxx", "Keith Murray", "Jennifer Hudson",
+  "Marvin Gaye", "Deliverance", "Big Sean", "Wolf",
+  "Mary Mary", "Chuck Jackson", "The Hombres",
+  "Taio Cruz", "Jim Jones", "Today's People", "Michael Ray",
+  "Ray Anthony", "Baby Bash", "'Til Tuesday", "Goodfellaz",
+  "Fat Joe", "Naughty By Nature", "Vanessa Williams", "Jeremy Jordan",
+  "Jesse McCartney", "J-Kwon", "The Candymen", "Ja Rule",
+  "Bow Wow", "Hi Tek 3", "Nicholas David",
+  "surf mesa", "L.A. Style", "Kungs", "The Easybeats",
+  "Marlowe Morris Quintet", "Edgar Winter", "Mashmakhan", "Mya",
+  "Kid Ink", "The Mirettes", "Bone Crusher",
+  "Yaki-Da", "Tom Scott", "Every Mothers' Son", "Santo & Johnny", "The Philarmonics",
+  "Carl Thomas", "Everclear", "Charlie Wilson", "Ben Rector", "The Kingsmen",
+  "Musique", "Uncle Dog", "Johnny Rivers", "The Kiki Dee Band", "The Radiants",
+  "AWB", "Patra", "Sam Hunt", "Eric Hine", "Rita Coolidge",
+  "Denny Reed", "Classics IV", "Baby Bash", "Sailcat",
+  "Jay-Z", "Mocca Soul", "Ja Rule", "John Mayer",
+  "East Coast Family", "Steve Carlisle", "Kingdom Come", "The Village Soul Choir",
+  "2 Chainz", "Flo Rida", "Jamul",
+  "Toni Braxton"
+)
+
+# Get spotify data 
+list1 <- billboard[1:14]
+list2 <- billboard[15:28]
+list3 <- billboard[29:42]
+list4 <- billboard[43:56]
+list5 <- billboard[57:70]
+list6 <- billboard[71:84]
+list7 <- billboard[85:100]
+
+billboard1<-get_artists_data(list1)
+billboard2<-get_artists_data(list2)
+billboard3<-get_artists_data(list3)
+billboard4<-get_artists_data(list4)
+billboard5<-get_artists_data(list5)
+billboard6<-get_artists_data(list6)
+billboard7<-get_artists_data(list7)
+
+billboard_100 <- bind_rows(counter1, counter2, counter3, counter4, counter5, counter6, counter7)
+
+# Load data to prevent repeated scraping while knitting 
+write.csv(billboard_100, "counter_100.csv")
+}
+```
+
+
+```{r Plot Weeks on Chart,warning= FALSE, message=FALSE}
+
+chart_data<-read.csv("~/472/chart_data.csv")
+
+rollingstones<-c(  "The Beatles", "Bob Dylan", "Elvis Presley", "The Rolling Stones", "Chuck Berry",
+  "Jimi Hendrix", "James Brown", "Little Richard", "Aretha Franklin", "Ray Charles",
+  "Bob Marley", "The Beach Boys", "Buddy Holly", "Led Zeppelin", "Stevie Wonder",
+  "Sam Cooke", "Muddy Waters", "Marvin Gaye", "The Velvet Underground", "Bo Diddley",
+  "Otis Redding", "U2", "Bruce Springsteen", "Jerry Lee Lewis", "Fats Domino",
+  "Ramones", "The Clash", "The Who", "The Rolling Stones", "Johnny Cash",
+  "Smokey Robinson", "The Everly Brothers", "Neil Young", "James Taylor", "The Byrds",
+  "The Allman Brothers Band", "The Talking Heads", "The Police", "The Kinks", "Van Morrison",
+  "Sly and the Family Stone", "Cheap Trick", "Lynyrd Skynyrd", "The Yardbirds", "The Ramones",
+  "The Eagles", "Prince", "The Drifters", "Simon & Garfunkel", "The Doors", "Blondie",
+  "John Lee Hooker", "Roy Orbison", "The Bee Gees", "Aerosmith", "Creedence Clearwater Revival",
+  "The Temptations", "The Band", "Guns N' Roses", "The Stooges", "Bo Diddley", "Cream",
+  "The Miracles", "The Four Tops", "Tupac Shakur", "Parliament-Funkadelic", "Elton John",
+  "The Mamas and the Papas", "Los Lobos", "Santana", "Tom Petty and the Heartbreakers",
+  "A Tribe Called Quest", "AC/DC", "The Shirelles", "Beastie Boys", "The Byrds", "Janis Joplin",
+  "The Drifters", "The Coasters", "The Jackson 5", "Sam & Dave", "Metallica", "Buddy Guy",
+  "Ike and Tina Turner", "The Red Hot Chili Peppers", "Frank Zappa", "Earth, Wind & Fire",
+  "The Pretenders", "The Flamingos", "The Velvet Underground", "The Beach Boys", "OutKast",
+  "Booker T. & the M.G.'s", "The O'Jays", "The Byrds", "Pink Floyd", "Cream", "Wilson Pickett",
+  "Etta James", "The Four Tops")
+
+billboard <- c(
+  "Ariana Grande", "David Hallyday", "The Church",
+  "Benny Blanco", "Tim McGraw", "Twista",
+  "Jackie Moore", "Maren Morris", "J. Cole",
+  "Phill Wilson", "Usher", "Lucille Starr", "The San Remo Golden Strings",
+  "Mario Vazquez", "Travis Scott", "Lil' Mo", "Mary Lambert",
+  "Meek Mill", "Nicky Jam", "Chris Brown",
+  "Inner Circle", "Dusty Springfield", "Rozetta Johnson", "Major Lazer",
+  "Inez Foxx", "Keith Murray", "Jennifer Hudson",
+  "Marvin Gaye", "Deliverance", "Big Sean", "Wolf",
+  "Mary Mary", "Chuck Jackson", "The Hombres",
+  "Taio Cruz", "Jim Jones", "Today's People", "Michael Ray",
+  "Ray Anthony", "Baby Bash", "'Til Tuesday", "Goodfellaz",
+  "Fat Joe", "Naughty By Nature", "Vanessa Williams", "Jeremy Jordan",
+  "Jesse McCartney", "J-Kwon", "The Candymen", "Ja Rule",
+  "Bow Wow", "Hi Tek 3", "Nicholas David",
+  "surf mesa", "L.A. Style", "Kungs", "The Easybeats",
+  "Marlowe Morris Quintet", "Edgar Winter", "Mashmakhan", "Mya",
+  "Kid Ink", "The Mirettes", "Bone Crusher",
+  "Yaki-Da", "Tom Scott", "Every Mothers' Son", "Santo & Johnny", "The Philarmonics",
+  "Carl Thomas", "Everclear", "Charlie Wilson", "Ben Rector", "The Kingsmen",
+  "Musique", "Uncle Dog", "Johnny Rivers", "The Kiki Dee Band", "The Radiants",
+  "AWB", "Patra", "Sam Hunt", "Eric Hine", "Rita Coolidge",
+  "Denny Reed", "Classics IV", "Baby Bash", "Sailcat",
+  "Jay-Z", "Mocca Soul", "Ja Rule", "John Mayer",
+  "East Coast Family", "Steve Carlisle", "Kingdom Come", "The Village Soul Choir",
+  "2 Chainz", "Flo Rida", "Jamul",
+  "Toni Braxton"
+)
+
+# Prepare to plot: add variable "Type" to be used as legends, filter unrelated artists
+chart_data <- chart_data %>%
+  mutate(Type = case_when(
+    Performer %in% billboard ~ "Billboard",
+    Performer %in% rollingstones ~ "RollingStone",
+    TRUE ~ NA_character_  # Delete if none of the conditions are met
+  )) %>%
+  filter(!is.na(Type))
+
+# Filter to only only each artist's song with the highest week on the billboard chart, in descending order
+chart_data <- chart_data %>%
+  arrange(desc(Weeks.on.Chart))
+
+filtered_chart_data <- chart_data %>%
+  group_by(Performer) %>%
+  filter(Weeks.on.Chart == max(Weeks.on.Chart)) %>%
+  ungroup()
+
+# Select certain performers for a-xis labels 
+selected_performers <- c("Ariana Grande", "John Mayer", "Major Lazer", "J. Cole", 
+                         "Travis Scott", "The Beatles", "Bob Dylan", 
+                         "Elvis Presley", "Prince", "Chuck Berry")
+
+filtered_chart_data$custom_labels <- ifelse(filtered_chart_data$Performer %in% selected_performers, as.character(filtered_chart_data$Performer), "")
+
+
+ggplot(filtered_chart_data, aes(x = reorder(Performer, -Weeks.on.Chart), y = Weeks.on.Chart, fill = Type)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  scale_x_discrete(labels = filtered_chart_data$custom_labels) + # Corrected to use 'filtered_chart_data$custom_labels'
+  scale_fill_manual(values = c("Billboard" = "darkorange", "RollingStone" = "deepskyblue")) +
+  labs(title = "Figure 1: Number of weeks on the Billboard chart for Rolling Stone artists' 
+       and other artists' top songs",
+       x = "Artist",
+       y = "Number of Weeks on the Billboard Chart",
+       fill = "Source") +
+  theme(axis.text.x = element_text(angle = 65, vjust = 0.6, hjust = 1, size = 8),
+        legend.position = "top",
+        legend.title = element_text(size = 10)) +
+  ylim(0, 52)
+```
+
+
+
+
+## Analysis
+Figure 1 illustrates the number of weeks on the Billboard chart for top songs of Rolling Stone and Billboard artists. This exploratory visualization examines whether their music has truly endured, before analyzing the song features. From the chart, most Rolling Stone artists (blue) are concentrated in the middle, while Billboard artists dominate both ends of the chart. This initial analysis suggests that top songs of Rolling Stone artists remained on the chart less than other artists. Nevertheless, their sustained presence on the chart suggests enduring appeal. 
+
+
+```{r Plot correlation, warning= FALSE, message=FALSE}
+
+rollingstone1<-read.csv("~/472/rt_100.csv")
+billboard1<-read.csv("~/472/bb_100.csv")
+
+# Correlation matrix for final Rollingstone artists
+cor_rollingstone <- cor(rollingstone1[c("instrumentalness", "valence", "danceability","energy", "loudness", "speechiness", "acousticness")])
+
+# Correlation matrix for Billboard dataset
+cor_billboard <- cor(billboard1[c("instrumentalness", "valence", "danceability","energy", "loudness", "speechiness", "acousticness")])
+
+plot_rollingstone <- ggcorrplot(
+  cor_rollingstone,
+  type = "upper", 
+  title = "Figure 2: Correlations between song 
+  features of the Rollingstone artists",
+  colors = c("deepskyblue", "white", "darkorange"),
+   ggtheme = theme_minimal() + theme(
+    plot.margin = margin(t = 30, r = 10, b = 10, l = 20), 
+    plot.title = element_text(size = 8) # Adjust title size
+  )
+)
+
+plot_billboard <- ggcorrplot(
+  cor_billboard,
+  type = "upper", 
+  title = "Figure 3: Correlations between song 
+  features of the selected Billboard artists",
+  colors = c("deepskyblue", "white", "darkorange"),
+   ggtheme = theme_minimal() + theme(
+    plot.margin = margin(t = 30, r = 10, b = 10, l = 20), 
+    plot.title = element_text(size = 8) 
+  )
+)
+
+
+# Arrange the plots side by side
+grid.arrange(plot_rollingstone, plot_billboard, ncol = 2)
+```
+
+
+
+
+Figures 2 and 3 show correlations between song features. Here, we see that top songs of both groups show some similarity, such as high correlation between loudness and energy. However, Rolling Stone artists exhibit a positive correlation between acousticness and valence, suggesting that their acoustic-rich music tends to be perceived as positive or cheerful. Billboard artists show a stronger correlation between danceability and energy, indicating that their chart-topping songs are more energetic and suitable for dancing. These features are worth further exploring as they may distinguish the music of Rolling Stone artists from other artists. 
+
+
+
+
+```{r Plot difference in means, warning= FALSE, message=FALSE}
+
+# Add a new column to each dataset to for plotting
+rollingstone1$Type<- "rollingstones"
+billboard1$Type <- "billboard"
+
+# Prepare to plot: combine the dataset, selecting only variables to plot, pivot longer
+combined_data <- bind_rows(rollingstone1, billboard1)
+
+select_data <- combined_data %>%
+  select(instrumentalness, valence, danceability, energy, speechiness, Type)
+
+spotify_plot <- gather(select_data, key = "Variable", value = "Value", -Type)
+
+
+dodge_width <- 0.9
+ggplot(spotify_plot, aes(x = Variable, y = Value, fill = Type)) +
+  stat_summary(fun.y = mean, geom = "bar", position = position_dodge(dodge_width)) +
+  scale_fill_manual(values = c("billboard" = "darkorange", "rollingstones" = "deepskyblue")) + 
+  ylab("Mean") +
+  xlab("Variable") +
+  labs(title = "Figure 4: Difference in means of the song features between Rollingstone and Billboard artists") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+```
+
+```{r, p-value, warning= FALSE, message=FALSE}
+
+features <- c("instrumentalness", "valence", "danceability", "energy", "speechiness")
+
+# Loop through the variables and calculate p-values
+p_value_spotify <- data.frame(Variable = character(), P_Value = numeric(), stringsAsFactors = FALSE)
+
+for (variable in features) {
+  t_test_result <- t.test(rollingstone1[, variable], billboard1[, variable])
+  
+  p_value <- t_test_result$p.value
+  
+  p_value_spotify <- rbind(p_value_spotify, data.frame(Variable = variable, P_Value = p_value))
+}
+
+```
+
+
+
+To test the extent of feature differences, figure 4 presents the means of song features between Rolling Stone and Billboard groups. The characteristics between the two groups appear similar, with nearly identical means for instrumentalness. However, apart from instrumentalness, all features are statistically significant at p < 0.05. Rolling stone artists have slightly slower songs and sadder mood, potentially contributing to their enduring engagement. 
+
+
+## Conclusion 
+Rolling Stone's greatest artists have achieved enduring engagement, with their top songs present for at least 10 weeks on the Billboard chart. Valence, a feature from the Spotify API, appears to be the most likely explanation for enduring engagement, as Rolling Stone artists have higher means. I conclude that Rolling Stone artists tend to convey sadder emotions and lower energy, possibly explaining their enduring engagement. However, it is possible that the results would be different with another set of randomly selected billboard artists. Moreover, the analysis holds the limitation that the study is rather exploratory, with no official statistical or causal analysis to isolate certain effects. Finally, the operationalization of enduring engagement may not encompass all aspects contributing to music's enduring nature, such as artist characteristics and album promotions. Future projects should consider a broader range of characteristics to study factors associated with musical artists' enduring engagement.
+
+
+## Appendix
+Spotify Audio Features (see more [here](https://developer.spotify.com/documentation/web-api/reference/get-audio-features)):
+1. danceability: Danceability describes how suitable a track is for dancing. A value of 0.0 is least danceable and 1.0 is most danceable.
+2. energy: Energy is a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity.
+3. instrumentalness: Predicts whether a track contains no vocals. The closer the instrumentalness value is to 1.0, the greater likelihood the track contains no vocal content.
+4. speechiness: Speechiness detects the presence of spoken words in a track. The more exclusively speech-like the recording, the closer to 1.0 the attribute value.
+5. valence: A measure from 0.0 to 1.0 describing the musical positiveness conveyed by a track. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric)
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE} 
+```
